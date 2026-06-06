@@ -47,19 +47,61 @@ export default function Resultados({ userData, ikigai, cimientos, scores, onClos
     const { default: jsPDF } = await import("jspdf");
     const html2canvas = (await import("html2canvas")).default;
 
-    if (!reportRef.current) return;
+    const el = document.getElementById("results-section");
+    if (!el) return;
 
-    const canvas = await html2canvas(reportRef.current, {
+    const canvas = await html2canvas(el, {
+      useCORS: true,
+      allowTaint: true,
+      scale: 1.5,
       backgroundColor: "#0A0A0A",
-      scale: 2,
+      onclone: (clonedDoc) => {
+        // Remove all external stylesheets — they contain lab() colors html2canvas can't parse
+        clonedDoc.querySelectorAll('link[rel="stylesheet"]').forEach((s) => s.remove());
+        // Remove Next.js inline style tags that may also contain lab()
+        clonedDoc.querySelectorAll("style").forEach((s) => s.remove());
+        // Re-inject only safe styles needed for the snapshot
+        const style = clonedDoc.createElement("style");
+        style.textContent = `
+          * { color-scheme: dark !important; box-sizing: border-box; }
+          body { background: #0A0A0A; color: #F5F5F5; }
+        `;
+        clonedDoc.head.appendChild(style);
+      },
     });
+
     const imgData = canvas.toDataURL("image/png");
-
     const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
-    const pdfWidth = pdf.internal.pageSize.getWidth();
-    const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+    const pdfW = pdf.internal.pageSize.getWidth();
+    const pdfH = pdf.internal.pageSize.getHeight();
+    const imgW = pdfW;
+    const imgH = (canvas.height * imgW) / canvas.width;
 
-    pdf.addImage(imgData, "PNG", 0, 0, pdfWidth, pdfHeight);
+    if (imgH <= pdfH) {
+      pdf.addImage(imgData, "PNG", 0, 0, imgW, imgH);
+    } else {
+      // Split tall content across multiple pages
+      const pageHeightPx = (pdfH * canvas.width) / imgW;
+      let offsetPx = 0;
+      let isFirstPage = true;
+
+      while (offsetPx < canvas.height) {
+        const sliceHeightPx = Math.min(pageHeightPx, canvas.height - offsetPx);
+        const sliceCanvas = document.createElement("canvas");
+        sliceCanvas.width = canvas.width;
+        sliceCanvas.height = sliceHeightPx;
+        const ctx = sliceCanvas.getContext("2d");
+        if (ctx) {
+          ctx.drawImage(canvas, 0, offsetPx, canvas.width, sliceHeightPx, 0, 0, canvas.width, sliceHeightPx);
+        }
+        if (!isFirstPage) pdf.addPage();
+        const sliceH = (sliceHeightPx * imgW) / canvas.width;
+        pdf.addImage(sliceCanvas.toDataURL("image/png"), "PNG", 0, 0, imgW, sliceH);
+        offsetPx += sliceHeightPx;
+        isFirstPage = false;
+      }
+    }
+
     pdf.save(`diagnostico-4x4-${userData.nombre.replace(/\s+/g, "-")}.pdf`);
   }
 
@@ -72,7 +114,7 @@ export default function Resultados({ userData, ikigai, cimientos, scores, onClos
       className="w-full max-w-4xl mx-auto"
     >
       {/* Printable area */}
-      <div ref={reportRef} className="bg-[#0A0A0A] px-6 py-8">
+      <div id="results-section" ref={reportRef} className="bg-[#0A0A0A] px-6 py-8">
         {/* Header */}
         <div className="border-b border-[#D4A017]/30 pb-6 mb-8">
           <p className="text-[#D4A017] font-bebas text-2xl tracking-widest mb-1">
