@@ -45,60 +45,39 @@ export default function Resultados({ userData, ikigai, cimientos, scores, onClos
 
   async function handleDownloadPDF() {
     const { default: jsPDF } = await import("jspdf");
-    const html2canvas = (await import("html2canvas")).default;
+    const { toPng } = await import("html-to-image");
 
     const el = document.getElementById("results-section");
     if (!el) return;
 
-    const canvas = await html2canvas(el, {
-      useCORS: true,
-      allowTaint: true,
-      scale: 1.5,
+    const dataUrl = await toPng(el, {
+      pixelRatio: 2,
       backgroundColor: "#0A0A0A",
-      onclone: (clonedDoc) => {
-        // Remove all external stylesheets — they contain lab() colors html2canvas can't parse
-        clonedDoc.querySelectorAll('link[rel="stylesheet"]').forEach((s) => s.remove());
-        // Remove Next.js inline style tags that may also contain lab()
-        clonedDoc.querySelectorAll("style").forEach((s) => s.remove());
-        // Re-inject only safe styles needed for the snapshot
-        const style = clonedDoc.createElement("style");
-        style.textContent = `
-          * { color-scheme: dark !important; box-sizing: border-box; }
-          body { background: #0A0A0A; color: #F5F5F5; }
-        `;
-        clonedDoc.head.appendChild(style);
-      },
+      cacheBust: true,
     });
 
-    const imgData = canvas.toDataURL("image/png");
+    const img = new Image();
+    img.src = dataUrl;
+    await new Promise((res) => (img.onload = res));
+
     const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
     const pdfW = pdf.internal.pageSize.getWidth();
     const pdfH = pdf.internal.pageSize.getHeight();
     const imgW = pdfW;
-    const imgH = (canvas.height * imgW) / canvas.width;
+    const imgH = (img.height * imgW) / img.width;
 
     if (imgH <= pdfH) {
-      pdf.addImage(imgData, "PNG", 0, 0, imgW, imgH);
+      pdf.addImage(dataUrl, "PNG", 0, 0, imgW, imgH);
     } else {
-      // Split tall content across multiple pages
-      const pageHeightPx = (pdfH * canvas.width) / imgW;
-      let offsetPx = 0;
-      let isFirstPage = true;
-
-      while (offsetPx < canvas.height) {
-        const sliceHeightPx = Math.min(pageHeightPx, canvas.height - offsetPx);
-        const sliceCanvas = document.createElement("canvas");
-        sliceCanvas.width = canvas.width;
-        sliceCanvas.height = sliceHeightPx;
-        const ctx = sliceCanvas.getContext("2d");
-        if (ctx) {
-          ctx.drawImage(canvas, 0, offsetPx, canvas.width, sliceHeightPx, 0, 0, canvas.width, sliceHeightPx);
-        }
-        if (!isFirstPage) pdf.addPage();
-        const sliceH = (sliceHeightPx * imgW) / canvas.width;
-        pdf.addImage(sliceCanvas.toDataURL("image/png"), "PNG", 0, 0, imgW, sliceH);
-        offsetPx += sliceHeightPx;
-        isFirstPage = false;
+      let position = 0;
+      let heightLeft = imgH;
+      pdf.addImage(dataUrl, "PNG", 0, position, imgW, imgH);
+      heightLeft -= pdfH;
+      while (heightLeft > 0) {
+        position -= pdfH;
+        pdf.addPage();
+        pdf.addImage(dataUrl, "PNG", 0, position, imgW, imgH);
+        heightLeft -= pdfH;
       }
     }
 
